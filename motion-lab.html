@@ -2,22 +2,67 @@
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Motion Lab — 8-frame walk cycle</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:#0d1018;color:#f1f4fa}main{max-width:1240px;margin:auto;padding:28px}h1{margin:0 0 8px;font-size:30px}p{color:#9daac0;line-height:1.5}.bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:22px 0}.bar label{display:flex;align-items:center;gap:8px;color:#c8d2e2}.bar input{width:100px;accent-color:#ffc247}button,a.button{background:#ffc247;color:#13151b;border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:pointer;text-decoration:none}button.secondary,a.secondary{background:#252c3a;color:white}.panel{background:#151b27;border:1px solid #2a3445;border-radius:14px;padding:18px;margin:14px 0}canvas{image-rendering:pixelated;max-width:100%;height:auto}#preview{width:256px;max-width:100%;display:block;margin:auto}.frames{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.frame{background:#0e1420;border:1px solid #2a3445;border-radius:8px;text-align:center;overflow:hidden}.frame canvas{width:100%}.frame span{display:block;font-size:12px;color:#a5b2c7;padding:6px}.caption{font-size:13px;color:#a8b4c7}strong{color:white}@media(max-width:640px){.frames{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:16px}}</style></head>
-<body><main><a href="./sprite-player.html" style="color:#ffc247">← Sprite Studio</a><h1>Motion Lab: 8 кадров ходьбы</h1><p>Проверка механики шага <strong>до рисования персонажа</strong>. Два полушага, противоположные движения рук, фаза опоры и фаза переноса стопы. Скелетные позы и экспорт прозрачных PNG. Это процедурный прототип, не импорт mocap и не готовый пиксель-арт.</p>
+<body><main><a href="./sprite-player.html" style="color:#ffc247">← Sprite Studio</a><h1>Motion Lab: 8 кадров ходьбы</h1><p>Проверка механики шага <strong>до рисования персонажа</strong>. Два полушага, руки по разные стороны туловища, перенос веса, сгибание коленей и мягкое движение корпуса. Скелетные позы и экспорт прозрачных PNG. Это процедурный прототип, не импорт mocap и не готовый пиксель-арт.</p>
 <div class="bar"><label>Длина шага <input id="stride" type="range" min="35" max="100" value="70"></label><label>Подъём стопы <input id="lift" type="range" min="5" max="44" value="23"></label><label>FPS <input id="fps" type="range" min="4" max="16" value="8"><output id="fpsText">8</output></label><button id="play">Пауза</button><button id="exportSheet">Скачать PNG 4×2</button><button id="exportFrames" class="secondary">Скачать 8 PNG</button></div>
 <div class="panel"><canvas id="preview" width="256" height="256"></canvas><p id="state" class="caption" style="text-align:center"></p></div>
 <div class="panel"><h2>Восемь фаз одного цикла</h2><div id="frames" class="frames"></div></div>
-<p class="caption">Алгоритм: во время опоры стопа остаётся на земле и смещается относительно корпуса назад; во время переноса поднимается и возвращается вперёд. Колено вычисляется из длины бедра и голени (двухзвенная IK). Корпус остаётся на общей базовой линии. Кадры 1–4 и 5–8 меняют ведущую ногу. В PNG фон действительно прозрачный.</p>
+<p class="caption">Алгоритм: во время опоры стопа остаётся на земле и смещается относительно корпуса назад; во время переноса поднимается и возвращается вперёд. Колено вычисляется из длины бедра и голени (двухзвенная IK). Таз и плечи слегка смещаются, корпус наклоняется, голова компенсирует движение. Дальняя рука рисуется позади корпуса, ближняя — перед ним. Кадры 1–4 и 5–8 меняют ведущую ногу. В PNG фон действительно прозрачный.</p>
 </main><script>
 const S=256, count=8;const $=id=>document.getElementById(id);let frame=0,playing=true,last=0;const names=['Контакт: левая впереди','Опора: левая','Перенос: правая','Отталкивание: левая','Контакт: правая впереди','Опора: правая','Перенос: левая','Отталкивание: правая'];
 function smooth(t){return t*t*(3-2*t)}
-function foot(phase,hip,stride,lift){let p=(phase%1+1)%1;if(p<.5){let t=p*2;return {x:hip+stride*(.5-t),y:218,stance:true}}let t=(p-.5)*2;return {x:hip+stride*(-.5+smooth(t)),y:218-lift*Math.sin(Math.PI*t),stance:false}}
-function knee(h,f,upper=58,lower=60){let dx=f.x-h.x,dy=f.y-h.y,d=Math.max(.01,Math.hypot(dx,dy));let clamped=Math.min(d,upper+lower-.001);let along=(upper*upper-lower*lower+clamped*clamped)/(2*clamped);let perp=Math.sqrt(Math.max(0,upper*upper-along*along));let mx=h.x+dx*along/d,my=h.y+dy*along/d;return {x:mx+dy/d*perp,y:my-dx/d*perp}}
+function foot(phase,hip,stride,lift){
+  const p=(phase%1+1)%1,stanceEnd=.60;
+  if(p<stanceEnd){
+    const q=p/stanceEnd;
+    return {x:hip+stride*(.5-q),y:218,stance:true,roll:q};
+  }
+  const q=(p-stanceEnd)/(1-stanceEnd);
+  return {x:hip+stride*(-.5+smooth(q)),y:218-lift*Math.pow(Math.sin(Math.PI*q),1.15),stance:false,roll:q};
+}
+function knee(h,f,upper=57,lower=60){
+  const dx=f.x-h.x,dy=f.y-h.y,raw=Math.max(.01,Math.hypot(dx,dy));
+  const d=Math.min(raw,upper+lower-.01),along=(upper*upper-lower*lower+d*d)/(2*d);
+  const perp=Math.sqrt(Math.max(0,upper*upper-along*along));
+  return {x:h.x+dx*along/raw+dy/raw*perp,y:h.y+dy*along/raw-dx/raw*perp};
+}
 function line(c,a,b,color,w){c.strokeStyle=color;c.lineWidth=w;c.lineCap='round';c.lineJoin='round';c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke()}
 function dot(c,p,r,color){c.fillStyle=color;c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill()}
-function draw(c,i,options={}){c.clearRect(0,0,S,S);let stride=+$('stride').value,lift=+$('lift').value,t=i/count,hip={x:128,y:121+2*Math.cos(4*Math.PI*t)},shoulder={x:126,y:76+2*Math.cos(4*Math.PI*t)};let L=foot(t,hip.x,stride,lift),R=foot(t+.5,hip.x,stride,lift),legs=[{f:R,color:'#6483a7'},{f:L,color:'#ffc247'}];
-for(const l of legs){let k=knee(hip,l.f);line(c,hip,k,l.color,8);line(c,k,l.f,l.color,7);line(c,{x:l.f.x-9,y:l.f.y},{x:l.f.x+12,y:l.f.y},l.color,5);dot(c,k,4,'#dfe6f1')}
-let armSwing=24*Math.cos(2*Math.PI*t);let arms=[{x:shoulder.x-6+armSwing,y:122,color:'#6483a7'},{x:shoulder.x+6-armSwing,y:122,color:'#ffc247'}];line(c,hip,shoulder,'#e9effa',12);for(const a of arms){let elbow={x:(a.x+shoulder.x)/2+5,y:100};line(c,shoulder,elbow,a.color,7);line(c,elbow,a,a.color,6);dot(c,a,5,a.color)}dot(c,{x:shoulder.x+2,y:52+2*Math.cos(4*Math.PI*t)},17,'#f1f5fb');dot(c,{x:shoulder.x+9,y:49+2*Math.cos(4*Math.PI*t)},3,'#171d28');line(c,{x:shoulder.x+13,y:58},{x:shoulder.x+21,y:57},'#171d28',2);
-if(options.guides){c.save();c.globalAlpha=.35;line(c,{x:18,y:220},{x:238,y:220},'#8aa0bb',1);c.restore()}}
+function leg(c,h,f,color){
+  const k=knee(h,f);line(c,h,k,color,10);line(c,k,f,color,8);
+  const toeLift=f.stance?(f.roll>.77?-(f.roll-.77)*30:0):Math.min(5,Math.max(0,218-f.y)*.17);
+  const heel={x:f.x-8,y:f.y+Math.max(0,toeLift)*.2},toe={x:f.x+15,y:f.y+toeLift};
+  line(c,heel,toe,color,6);dot(c,k,4,'#dbe6f3');
+}
+function arm(c,shoulder,phase,color,back=false){
+  // Opposite leg and arm swing. Far arm is rendered BEHIND the torso.
+  const swing=Math.cos(2*Math.PI*phase),bend=Math.sin(2*Math.PI*phase);
+  const root={x:shoulder.x+(back?-5:5),y:shoulder.y+(back?2:0)};
+  const elbow={x:root.x+19*swing+(back?-5:5),y:root.y+25+3*Math.max(0,bend)};
+  const hand={x:elbow.x+11*swing+6,y:elbow.y+22-7*Math.max(0,-swing)};
+  line(c,root,elbow,color,9);line(c,elbow,hand,color,7);dot(c,hand,5,color);
+}
+function draw(c,i,options={}){
+  c.clearRect(0,0,S,S);
+  const stride=+$('stride').value,lift=+$('lift').value,t=i/count;
+  const double=Math.cos(4*Math.PI*t),bounce=3.2*(1-double)/2;
+  const lean=4+2*Math.sin(2*Math.PI*t+.3);
+  const hip={x:126+1.8*Math.sin(2*Math.PI*t),y:121+bounce};
+  const shoulder={x:hip.x+lean,y:77+bounce*.55+1.2*Math.sin(2*Math.PI*t+.8)};
+  const left=foot(t,hip.x,stride,lift),right=foot(t+.5,hip.x,stride,lift);
+  // Back limbs, torso, then front limbs: proper depth order.
+  leg(c,hip,right,'#6684aa');
+  arm(c,shoulder,t+.5,'#6684aa',true);
+  line(c,{x:hip.x-3,y:hip.y},{x:shoulder.x,y:shoulder.y},'#e6edf7',16);
+  line(c,{x:hip.x-7,y:hip.y-1},{x:hip.x+8,y:hip.y+1},'#a9b9ce',7);
+  leg(c,hip,left,'#ffc247');
+  arm(c,shoulder,t,'#ffc247',false);
+  const head={x:shoulder.x+3+1.4*Math.sin(2*Math.PI*t-.5),y:shoulder.y-24+bounce*.18};
+  line(c,{x:shoulder.x,y:shoulder.y-4},{x:head.x, y:head.y+11},'#d9e4f1',8);
+  dot(c,head,17,'#f1f5fb');
+  dot(c,{x:head.x+8,y:head.y-4},2.8,'#171d28');
+  line(c,{x:head.x+9,y:head.y+7},{x:head.x+17,y:head.y+6},'#171d28',2);
+  if(options.guides){c.save();c.globalAlpha=.35;line(c,{x:18,y:220},{x:238,y:220},'#8aa0bb',1);c.restore()}
+}
 function makeCanvas(i,guides=false){let c=document.createElement('canvas');c.width=c.height=S;draw(c.getContext('2d'),i,{guides});return c}
 const cells=[];for(let i=0;i<count;i++){let d=document.createElement('div');d.className='frame';let c=document.createElement('canvas');c.width=c.height=S;d.append(c);let label=document.createElement('span');label.textContent=(i+1)+'. '+names[i];d.append(label);$('frames').append(d);cells.push(c)}
 function redraw(){cells.forEach((c,i)=>draw(c.getContext('2d'),i,{guides:true}));draw($('preview').getContext('2d'),frame,{guides:true});$('state').textContent='Кадр '+(frame+1)+'/8 — '+names[frame];$('fpsText').textContent=$('fps').value}
