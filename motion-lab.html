@@ -6,61 +6,62 @@
 <div class="bar"><label>Длина шага <input id="stride" type="range" min="35" max="100" value="70"></label><label>Подъём стопы <input id="lift" type="range" min="5" max="44" value="23"></label><label>FPS <input id="fps" type="range" min="4" max="16" value="8"><output id="fpsText">8</output></label><button id="play">Пауза</button><button id="exportSheet">Скачать PNG 4×2</button><button id="exportFrames" class="secondary">Скачать 8 PNG</button></div>
 <div class="panel"><canvas id="preview" width="256" height="256"></canvas><p id="state" class="caption" style="text-align:center"></p></div>
 <div class="panel"><h2>Восемь фаз одного цикла</h2><div id="frames" class="frames"></div></div>
-<p class="caption">Алгоритм: во время опоры стопа остаётся на земле и смещается относительно корпуса назад; во время переноса поднимается и возвращается вперёд. Колено вычисляется из длины бедра и голени (двухзвенная IK). Таз и плечи слегка смещаются, корпус наклоняется, голова компенсирует движение. Дальняя рука рисуется позади корпуса, ближняя — перед ним. Кадры 1–4 и 5–8 меняют ведущую ногу. В PNG фон действительно прозрачный.</p>
+<p class="caption">Алгоритм: во время опоры стопа остаётся на земле и смещается относительно корпуса назад; во время переноса поднимается и возвращается вперёд. Колено вычисляется из длины бедра и голени (двухзвенная IK). Пропорции ориентированы на исходный референс: крупная голова и плечи, длинный корпус, укороченные ноги. Корпус наклонён вперёд. Руки движутся в противофазе и занимают противоположные стороны туловища. Кадры 1–4 и 5–8 меняют ведущую ногу. В PNG фон действительно прозрачный.</p>
 </main><script>
 const S=256, count=8;const $=id=>document.getElementById(id);let frame=0,playing=true,last=0;const names=['Контакт: левая впереди','Опора: левая','Перенос: правая','Отталкивание: левая','Контакт: правая впереди','Опора: правая','Перенос: левая','Отталкивание: правая'];
 function smooth(t){return t*t*(3-2*t)}
 function foot(phase,hip,stride,lift){
-  const p=(phase%1+1)%1,stanceEnd=.60;
-  if(p<stanceEnd){
-    const q=p/stanceEnd;
-    return {x:hip+stride*(.5-q),y:218,stance:true,roll:q};
-  }
-  const q=(p-stanceEnd)/(1-stanceEnd);
-  return {x:hip+stride*(-.5+smooth(q)),y:218-lift*Math.pow(Math.sin(Math.PI*q),1.15),stance:false,roll:q};
+  const p=(phase%1+1)%1,stance=.62;
+  if(p<stance){const u=p/stance;return {x:hip+stride*(.5-u),y:218,stance:true,roll:u}}
+  const u=(p-stance)/(1-stance);
+  return {x:hip+stride*(-.5+smooth(u)),y:218-lift*Math.sin(Math.PI*u),stance:false,roll:u};
 }
-function knee(h,f,upper=57,lower=60){
-  const dx=f.x-h.x,dy=f.y-h.y,raw=Math.max(.01,Math.hypot(dx,dy));
-  const d=Math.min(raw,upper+lower-.01),along=(upper*upper-lower*lower+d*d)/(2*d);
-  const perp=Math.sqrt(Math.max(0,upper*upper-along*along));
-  return {x:h.x+dx*along/raw+dy/raw*perp,y:h.y+dy*along/raw-dx/raw*perp};
+function knee(h,f,upper=43,lower=44){
+  let dx=f.x-h.x,dy=f.y-h.y,d=Math.max(.001,Math.hypot(dx,dy));
+  let d2=Math.min(d,upper+lower-.01),a=(upper*upper-lower*lower+d2*d2)/(2*d2);
+  let b=Math.sqrt(Math.max(0,upper*upper-a*a));
+  // Forward-facing knee: choose the rightward solution.
+  return {x:h.x+dx*a/d+dy*b/d,y:h.y+dy*a/d-dx*b/d};
 }
 function line(c,a,b,color,w){c.strokeStyle=color;c.lineWidth=w;c.lineCap='round';c.lineJoin='round';c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke()}
 function dot(c,p,r,color){c.fillStyle=color;c.beginPath();c.arc(p.x,p.y,r,0,Math.PI*2);c.fill()}
-function leg(c,h,f,color){
-  const k=knee(h,f);line(c,h,k,color,10);line(c,k,f,color,8);
-  const toeLift=f.stance?(f.roll>.77?-(f.roll-.77)*30:0):Math.min(5,Math.max(0,218-f.y)*.17);
-  const heel={x:f.x-8,y:f.y+Math.max(0,toeLift)*.2},toe={x:f.x+15,y:f.y+toeLift};
-  line(c,heel,toe,color,6);dot(c,k,4,'#dbe6f3');
+function leg(c,hip,foot,color){
+  let k=knee(hip,foot);
+  line(c,hip,k,color,12);line(c,k,foot,color,10);
+  let toe={x:foot.x+14,y:foot.y-(foot.stance&&foot.roll>.78?9*(foot.roll-.78)/.22:0)};
+  line(c,{x:foot.x-7,y:foot.y},toe,color,7);dot(c,k,5,'#b6c4d7');
 }
-function arm(c,shoulder,phase,color,back=false){
-  // Opposite leg and arm swing. Far arm is rendered BEHIND the torso.
-  const swing=Math.cos(2*Math.PI*phase),bend=Math.sin(2*Math.PI*phase);
-  const root={x:shoulder.x+(back?-5:5),y:shoulder.y+(back?2:0)};
-  const elbow={x:root.x+19*swing+(back?-5:5),y:root.y+25+3*Math.max(0,bend)};
-  const hand={x:elbow.x+11*swing+6,y:elbow.y+22-7*Math.max(0,-swing)};
-  line(c,root,elbow,color,9);line(c,elbow,hand,color,7);dot(c,hand,5,color);
+function arm(c,shoulder,swing,color,far){
+  // Hands move in opposite directions on the LEFT and RIGHT of the torso.
+  let root={x:shoulder.x+(far?-5:5),y:shoulder.y+(far?0:3)};
+  let elbow={x:root.x+19*swing+(far?-3:3),y:root.y+22+3*Math.abs(swing)};
+  let hand={x:root.x+37*swing+(far?-3:3),y:root.y+42-7*Math.max(0,swing)};
+  line(c,root,elbow,color,11);line(c,elbow,hand,color,9);dot(c,hand,5,color);
 }
 function draw(c,i,options={}){
   c.clearRect(0,0,S,S);
-  const stride=+$('stride').value,lift=+$('lift').value,t=i/count;
-  const double=Math.cos(4*Math.PI*t),bounce=3.2*(1-double)/2;
-  const lean=4+2*Math.sin(2*Math.PI*t+.3);
-  const hip={x:126+1.8*Math.sin(2*Math.PI*t),y:121+bounce};
-  const shoulder={x:hip.x+lean,y:77+bounce*.55+1.2*Math.sin(2*Math.PI*t+.8)};
-  const left=foot(t,hip.x,stride,lift),right=foot(t+.5,hip.x,stride,lift);
-  // Back limbs, torso, then front limbs: proper depth order.
-  leg(c,hip,right,'#6684aa');
-  arm(c,shoulder,t+.5,'#6684aa',true);
-  line(c,{x:hip.x-3,y:hip.y},{x:shoulder.x,y:shoulder.y},'#e6edf7',16);
-  line(c,{x:hip.x-7,y:hip.y-1},{x:hip.x+8,y:hip.y+1},'#a9b9ce',7);
-  leg(c,hip,left,'#ffc247');
-  arm(c,shoulder,t,'#ffc247',false);
-  const head={x:shoulder.x+3+1.4*Math.sin(2*Math.PI*t-.5),y:shoulder.y-24+bounce*.18};
-  line(c,{x:shoulder.x,y:shoulder.y-4},{x:head.x, y:head.y+11},'#d9e4f1',8);
-  dot(c,head,17,'#f1f5fb');
-  dot(c,{x:head.x+8,y:head.y-4},2.8,'#171d28');
-  line(c,{x:head.x+9,y:head.y+7},{x:head.x+17,y:head.y+6},'#171d28',2);
+  let stride=+$('stride').value,lift=+$('lift').value,t=i/count;
+  // Original punk proportions: large head and shoulders, long torso, short legs.
+  let bob=2.4*(1-Math.cos(4*Math.PI*t))/2;
+  let hip={x:121+1.5*Math.sin(2*Math.PI*t),y:145+bob};
+  let shoulder={x:hip.x+15+1.5*Math.sin(2*Math.PI*t+.4),y:91+bob*.65};
+  let head={x:shoulder.x+5,y:shoulder.y-26+bob*.2};
+  let L=foot(t,hip.x,stride,lift),R=foot(t+.5,hip.x,stride,lift);
+  // Near (yellow) leg is forward at frame 1; near arm swings BACK.
+  // Far (blue) arm is forward, rendered behind chest.
+  let swing=Math.cos(2*Math.PI*t);
+  leg(c,hip,R,'#5c83a8');
+  arm(c,shoulder,swing,'#5c83a8',true);
+  // Torso leans FORWARD, head remains ahead of hips, not behind.
+  c.fillStyle='#dce6f5';c.beginPath();
+  c.moveTo(shoulder.x-13,shoulder.y-6);c.lineTo(shoulder.x+14,shoulder.y-4);
+  c.lineTo(hip.x+10,hip.y+2);c.lineTo(hip.x-11,hip.y+2);c.closePath();c.fill();
+  line(c,{x:hip.x-10,y:hip.y},{x:hip.x+11,y:hip.y},'#9cadc4',8);
+  leg(c,hip,L,'#ffc247');
+  arm(c,shoulder,-swing,'#ffc247',false);
+  line(c,{x:shoulder.x+2,y:shoulder.y-7},{x:head.x,y:head.y+13},'#dce6f5',10);
+  dot(c,head,20,'#f1f5fb');dot(c,{x:head.x+10,y:head.y-5},3,'#171d28');
+  line(c,{x:head.x+11,y:head.y+8},{x:head.x+19,y:head.y+7},'#171d28',2);
   if(options.guides){c.save();c.globalAlpha=.35;line(c,{x:18,y:220},{x:238,y:220},'#8aa0bb',1);c.restore()}
 }
 function makeCanvas(i,guides=false){let c=document.createElement('canvas');c.width=c.height=S;draw(c.getContext('2d'),i,{guides});return c}
